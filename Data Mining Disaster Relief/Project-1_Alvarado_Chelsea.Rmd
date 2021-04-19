@@ -1,0 +1,546 @@
+---
+title: "Disaster Relief Project: Part I"
+author: "Chelsea Alvarado"
+date: "3/1/2021"
+output:
+  rmdformats::downcute:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    highlight: breezedark
+    df_print: default
+    lightbox: true
+  
+
+---
+
+```{r global_options, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=FALSE,    # collapse by default
+                      echo=TRUE,         # echo code by default
+                      comment = "#>",    # change comment character
+                      fig.width = 5.5,     # set figure width
+                      fig.align = "center",# set figure position
+                      out.width = "49%", # set width of displayed images
+                      warning=TRUE,      # show R warnings
+                      message=TRUE,
+                      cache=TRUE)      # show R messages
+```
+
+<!--- Change font sizes (or other css modifications) --->
+<style>
+h1.title {
+  font-size: 2.2em; /* Title font size */
+}
+h1 {
+  font-size: 2em;   /* Header 1 font size */
+}
+h2 {
+  font-size: 1.5em;
+}
+h3 { 
+  font-size: 1.2em;
+}
+pre {
+  font-size: 0.8em;  /* Code and R output font size */
+}
+</style>
+
+
+
+**SYS 6018 | Spring 2021 | University of Virginia **
+
+*******************************************
+
+# Introduction 
+
+This project is aimed at being able to identify the location of displaced Haitian's after the catastrophic 2010 earthquake using a characteristic blue tarp. The motivation behind this project is to be able to quickly identify locations so that rescue workers can provide needed assistance such as food and medicine.
+The data set being used consists of three predictor variables/features that represent RGB values and a response variable which is a Class representing what each observation represents based on the combination of RGB values. In its original form the data is multiclass.
+This project will train data on five different models including Logisitic Regression, Linear Discriminant Analysis, Quadratic Discriminant Analysis, K-Nearest Neighbors, and Penalized Logistic Regression. The Penalized Logistic Regression Model will be chosen by comparing Ridge, Lassso, and Elastic Net Regression and picking the model with the best accuracy as the final penalized logistic regression model. The data will be split into a 70/30 training/test split and predictors will be normalized.The models will train on a training set while also using 10-fold Cross-Validation and then test on test data for accuracy and predictive ability. Our models will be classifying our data as "Blue Tarp","Various Non-Tarp", "Soil", "Vegetation", and "Rooftop" or in the case of logistic regression "Blue Tarp" or "Not Blue Trap". Tuning parameters(k, lambda) will be selected using cross validation. The results of each model will be presented at the end of the report in a table. 
+
+# Training Data / EDA {.tabset .tabset-pills}
+## Exploratory Data Analysis
+```{r}
+#load in data
+setwd("~/MSDS/Spring 2021/SYS6018/Project")
+pix_data <- read.csv("HaitiPixels.csv")
+pix_data <- as.data.frame(pix_data)
+attach(pix_data)
+
+#EDA
+#quantitative
+names(pix_data)
+head(pix_data)
+summary(pix_data)
+dim(pix_data)
+
+#check how many of each classification we have
+sum(Class== "Vegetation")
+sum(Class== "Blue Tarp")
+sum(Class=="Rooftop")
+sum(Class=="Soil")
+sum(Class=="Various Non-Tarp")
+
+#graphical
+pairs(pix_data[,2:4], lower.panel = NULL)
+cor(pix_data[,2:4])
+plot(pix_data, col= c("red","green","blue")) # not very useful since a class would be determined by the combination of the three rgb values
+```
+
+```{r load-packages, warning=FALSE, message=FALSE}
+# Load Required Packages
+library(tidyverse)
+library(ISLR)
+library(caret)
+library(e1071)
+library(boot)
+library(pROC)
+library(MASS)
+library(class)
+```
+
+## Set-up and Train/Test Split
+```{r echo=TRUE, warning=FALSE}
+#relabeling class names for classes that have spaces
+pix_data$Class[pix_data$Class=="Blue Tarp"] <- "Blue.Tarp"
+pix_data$Class[pix_data$Class=="Various Non-Tarp"] <- "Various.Non.Tarp"
+
+#scramble data 
+set.seed(4444)
+pix_data<-pix_data[sample(1:nrow(pix_data)),]
+
+
+#normalize predictor values
+normalize <-function(x) {
+  (x- min(x))/(max(x)-min(x))
+}
+
+pix_datanorm <- as.data.frame(lapply(pix_data[c(2,3,4)], normalize))
+pix_datanorm$Class<-pix_data[,1]
+pix_data<-pix_datanorm
+
+#factor class
+pix_data$Class <- as.factor(pix_data$Class)
+#data split 70/30
+set.seed(32)
+sample <- createDataPartition(pix_data$Class, p=0.7, list = FALSE)
+train <- pix_data[sample,]
+test <- pix_data[-sample,]
+
+train.class <- pix_data$Class
+test.class <- pix_data$Class
+```
+# Model Training {.tabset .tabset-pills}
+## Logistic Regression
+```{r echo=TRUE,warning=FALSE, cache=TRUE}
+#https://www.youtube.com/watch?v=BQ1VAZ7jNYQ
+#make new data frame but rename all variables that aren't blue tarp under one name
+log_df<-pix_data
+
+log_df$Class<- as.character(log_df$Class)
+
+log_df$Class[log_df$Class=="Various.Non.Tarp"] <- "Non.Tarp"
+log_df$Class[log_df$Class=="Soil"] <- "Non.Tarp"
+log_df$Class[log_df$Class=="Vegetation"] <- "Non.Tarp"
+log_df$Class[log_df$Class=="Rooftop"] <- "Non.Tarp"
+
+#factor response and relevel
+log_df$Class<-as.factor(log_df$Class)
+log_df$Class <-relevel(log_df$Class, ref = "Non.Tarp")
+
+#set up split
+sample <- createDataPartition(log_df$Class, p=0.7, list = FALSE)
+log.train <- log_df[sample,]
+log.test <- log_df[-sample,]
+
+#log.train.class <- log_df$Class
+log.test.class <- log.test$Class
+
+set.seed(4658)
+specs <- trainControl(method = "cv", number = 10, classProbs=TRUE)
+
+set.seed(356)
+
+#model
+log.mod <- train(log.train[,1:3],log.train[,4], method = "glm", family = "binomial", trControl = specs)
+
+#model summary
+log.mod
+summary(log.mod)
+```
+
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+#predicting against test data
+pred<-predict(log.mod,log.test)
+
+#confusion matrix
+c.matrix <- confusionMatrix(data=pred, log.test.class)
+c.matrix
+
+#calculating values for CV table
+tp.log <- c.matrix$table[1,1] #true positive
+fp.log <-c.matrix$table[1,2]# false positive
+fn.log <- c.matrix$table[2,1] #false negative
+tn.log <-c.matrix$table[2,2] # true negative
+cp.log<- tp.log + fn.log #condition positive (true positive + false negative)
+cn.log <- fp.log + tn.log #condition negative (false positive + true negative)
+total.log <- tp.log+fp.log+fn.log+tn.log
+
+precision.log <- tp.log/(tp.log+fp.log)
+
+tpr.log <- c.matrix$byClass['Sensitivity'] #true positive rate/sensitivity
+fpr.log <- fp.log/cn.log #false positive rate
+accuracy.log <- (tp.log+tn.log)/total.log 
+```
+
+```{r echo=TRUE, warning=FALSE,cache=TRUE}
+#code I ran to test thresholds
+#regression
+pix_log<-glm(Class~Red+Green+Blue,data=log.train, family=binomial)
+summary(pix_log)
+
+#preparing data for confusion matrix
+pix_log_prob<- predict(pix_log, log.test, type="response")
+pix_log_pred<-rep("Non.Tarp",length(pix_log_prob))  #non tarp classes lumped together all non blue tarp values under the label "Non.Tarp" 
+pix_log_pred[pix_log_prob>.5]="Blue.Tarp"
+
+#confusion matrix
+table(pix_log_pred,log.test.class)
+
+#correct predictions
+correct.log <- mean(pix_log_pred==log.test.class)
+correct.log
+#test error rate
+error_log_5<- mean(pix_log_pred!=log.test.class)
+error_log_5
+
+##using a higher threshold value 
+#preparing data for confusion matrix
+pix_log_prob<- predict(pix_log, log.test, type="response")
+pix_log_pred<-rep("Non.Tarp",length(pix_log_prob)) #since log reg produces binary response values I lumped together all non blue tarp values under the label "Not Tarp"
+pix_log_pred[pix_log_prob>.75]="Blue.Tarp"
+
+#confusion matrix
+table(pix_log_pred,log.test.class)
+
+#correct predictions
+mean(pix_log_pred==log.test.class)
+#test error rate
+error_log_7<- mean(pix_log_pred!=log.test.class)
+error_log_7
+
+threshold.log <- 0.5
+
+```
+
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+#ROC/AUC
+library(pROC)
+library(randomForest)
+
+log.pred <- predict(log.mod, newdata=log.test, probability = TRUE)
+log.pred <- as.ordered(log.pred)
+
+log.roc <- roc(log.test$Class, log.pred)
+plot(log.roc,ylim=c(0,1))
+
+auc.log <-log.roc$auc
+```
+
+### Threshold Justification
+Logistic regression is better suited for binary responses but our data is multi-class. Since we wanted to use logistic regression we were able to combine all the non-tarp classes under a single class of "Non.Tarp" and run the logistic model under that assumption. As for our tuning parameter, one is inclined to choose a higher value since in the situation we are handling sending out help to those who need it most requires resources and you don't want to waste time or money. After comparing a threshold of 0.5 and 0.75, just by test error, our model performs better at a threshold level of 0.75 but the difference is very small(in the thousandts of a decimal) between the two thresholds. The selected threshold value was chosen for ease of implmentation, as well as, restraints on threshold abilities using the train() function. I have chosen to use a threshold of 0.5. This is the assumed threshold value for all of our remaining models to remain as consistent as possible.
+
+## LDA
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+library(MASS)
+#train model
+lda.spec <- trainControl(method="cv", number = 10, savePredictions = TRUE)
+
+lda.mod <- train(Class~., data = train, method = "lda", trControl = lda.spec)
+lda.mod
+#preparing data for confusion matrix
+lda.pred<-predict(lda.mod, newdata=test)
+
+#confusion matrix
+c.matrixlda<- confusionMatrix(data=lda.pred, reference=test$Class)
+c.matrixlda
+
+#ROC/AUC
+library(pROC)
+library(randomForest)
+pred.lda <-predict(lda.mod, test, probability = TRUE)
+pred.lda<- as.ordered(pred.lda)
+
+roc.lda <-multiclass.roc(predictor = pred.lda, response = test$Class, plot=TRUE)
+
+auc.lda <- roc.lda$auc
+
+#calculating values for CV table
+tp.lda <- (c.matrixlda$table[1,1]) #true positive
+fp.lda <-(sum(sum(c.matrixlda$table[1,2:5]),(sum(c.matrixlda$table[2,3:5])),sum(c.matrixlda$table[3,4:5]),sum(c.matrixlda$table[4,5]))) # false positive
+fn.lda <- sum(sum(c.matrixlda$table[2,1]),(sum(c.matrixlda$table[3,1:2])),(sum(c.matrixlda$table[4,1:3])),(sum(c.matrixlda$table[5,1:4]))) #false negative
+tn.lda <-sum(c.matrixlda$table[2,2],c.matrixlda$table[3,3], c.matrixlda$table[4,4], c.matrixlda$table[5,5]) # true negative
+cp.lda<- tp.lda + fn.lda #condition positive (true positive + false negative)
+cn.lda <- fp.lda + tn.lda #condition negative (false positive + true negative)
+total.lda <- tp.lda+fp.lda+fn.lda+tn.lda
+
+precision.lda <- tp.lda/(tp.lda+fp.lda)
+
+tpr.lda <- (tp.lda/cp.lda) #true positive rate/sensitivity
+fpr.lda <- (fp.lda/cn.lda) #false positive rate
+accuracy.lda <- c.matrixlda$overall["Accuracy"]  
+```
+
+## QDA
+```{r echo = TRUE,warning=FALSE,cache=TRUE}
+qda.spec <- trainControl(method="cv", number = 10)
+
+qda.mod <- train(Class~., data = train, method = "qda", trControl = lda.spec)
+
+qda.mod
+#predict on model
+qda.pred<-predict(qda.mod, newdata=test)
+
+#confusion matrix
+c.matrixqda<- confusionMatrix(data=qda.pred, reference=test$Class)
+c.matrixqda
+
+#ROC/AUC
+pred.qda <-predict(qda.mod, test, probability = TRUE)
+pred.qda <- as.ordered(pred.qda)
+
+roc.qda <-multiclass.roc(predictor = pred.qda, response = test$Class, plot=TRUE)
+
+auc.qda <- roc.qda$auc
+
+#calculating values for CV table
+#confusion matrix 
+tp.qda <- (c.matrixqda$table[1,1]) #true positive
+fp.qda <-(sum(sum(c.matrixqda$table[1,2:5]),(sum(c.matrixqda$table[2,3:5])),sum(c.matrixqda$table[3,4:5]),sum(c.matrixqda$table[4,5]))) # false positive
+fn.qda <- sum(sum(c.matrixqda$table[2,1]),(sum(c.matrixqda$table[3,1:2])),(sum(c.matrixqda$table[4,1:3])),(sum(c.matrixqda$table[5,1:4]))) #false negative
+tn.qda <-sum(c.matrixqda$table[2,2],c.matrixqda$table[3,3], c.matrixqda$table[4,4], c.matrixqda$table[5,5]) # true negative
+cp.qda<- tp.qda + fn.qda #condition positive 
+cn.qda <- fp.qda + tn.qda #condition negative 
+total.qda <- tp.qda+fp.qda+fn.qda+tn.qda
+
+precision.qda <- tp.qda/(tp.qda+fp.qda)
+
+tpr.qda <- tp.qda/cp.qda #true positive rate/sensitivity
+fpr.qda <- fp.qda/cn.qda #false positive rate
+accuracy.qda <- c.matrixqda$overall["Accuracy"] 
+```
+
+## K-Nearest Neighbors
+```{r echo=TRUE, warning=FALSE,cache=TRUE}
+library(class)
+#http://topepo.github.io/caret/index.html
+set.seed(145)
+specs <- trainControl(method = "cv", number = 10)
+
+#model
+knn.mod <- train(train[,1:3],train[,4],method="knn", trControl=specs, metric = "Accuracy")
+knn.mod
+
+```
+
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+knn.pred<-predict(knn.mod, test)
+#confusion matrix
+c.matrixknn <- confusionMatrix(data=knn.pred, reference = test$Class)
+c.matrixknn
+
+#ROC/AUC 
+pred.knn <-predict(knn.mod, test, probability = TRUE)
+pred.knn <-as.ordered(pred.knn)
+
+roc.knn <-multiclass.roc(predictor = pred.knn, response = test$Class, plot=TRUE)
+
+auc.knn <-roc.knn$auc
+
+#calculating values for CV table
+#optimal k
+tune.knn <-knn.mod$bestTune[,1]
+#confusion matrix 
+tp.knn <- (c.matrixknn$table[1,1]) #true positive
+fp.knn <-(sum(sum(c.matrixknn$table[1,2:5]),(sum(c.matrixknn$table[2,3:5])),sum(c.matrixknn$table[3,4:5]),sum(c.matrixknn$table[4,5]))) # false positive
+fn.knn <- sum(sum(c.matrixknn$table[2,1]),(sum(c.matrixknn$table[3,1:2])),(sum(c.matrixknn$table[4,1:3])),(sum(c.matrixknn$table[5,1:4]))) #false negative
+tn.knn <-sum(c.matrixknn$table[2,2],c.matrixknn$table[3,3], c.matrixknn$table[4,4], c.matrixknn$table[5,5]) # true negative
+cp.knn<- tp.knn + fn.knn #condition positive 
+cn.knn <- fp.knn + tn.knn #condition negative
+total.knn <- tp.knn+fp.knn+fn.knn+tn.knn
+
+precision.knn <- tp.knn/(tp.knn+fp.knn)
+
+tpr.knn <- tp.knn/cp.knn #true positive rate/sensitivity
+fpr.knn <- fp.knn/cn.knn #false positive rate
+accuracy.knn <- c.matrixknn$overall["Accuracy"] 
+```
+
+
+### Tuning Parameter $k$
+The optimal K for our KNN model was selected by first running 10-fold Cross-Validation on our training data. Once the cross-validation was complete, the optimal k chosen for our model was based on accuracy. In the case of our KNN model a value of *k=9* produced the highest accuracy of *0.9276967*.
+
+## Penalized Logistic Regression (ElasticNet)
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+#deciding which penalized log reg model to use
+library(glmnet)
+#prep
+x.mat <- model.matrix(Class~., data=train)
+y <- train$Class
+#lambda grid
+grid=10^seq(10,-2,length=100)
+
+plr.spec <- trainControl(method = "cv", number = 10)
+
+set.seed(16454)
+
+#ridge regression
+ridge<- train(Class~., data=train, method ="glmnet", tuneGrid = expand.grid(alpha=0, lambda=grid), metric = "Accuracy")
+ridge.lam <- ridge$bestTune['lambda']
+ridge.acc <- ridge$results[6,3]
+
+lasso <- train(Class~., data=train, method ="glmnet", tuneGrid = expand.grid(alpha=1, lambda=grid), metric = "Accuracy")
+lasso.lam <- lasso$bestTune['lambda']
+lasso.acc <- lasso$results[1,3]
+
+#elasticnet(final model)
+elastic.spec <-trainControl(method = "cv", number = 10, classProbs = TRUE)
+set.seed(94)
+elastic.mod <- train(Class~., data=train, method = "glmnet", trControl = elastic.spec,  metric = "Accuracy")
+
+elastic.lam <- 0.000875
+elastic.acc <- elastic.mod$results[7,3]
+
+#comparing accuracy across all three
+acc.table <- data.frame(matrix(ncol = 3, nrow = 1))
+colnames(acc.table) <- c("Ridge", "Lasso", "ElasticNet")
+row.names(acc.table) <- ("Accuracy")
+acc.table[1,1] <- ridge.acc
+acc.table[1,2] <- lasso.acc
+acc.table[1,3] <- elastic.acc
+
+#show final table
+print(acc.table)
+```
+### Modeling best fit (ElasticNet)
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+#predict ontest data
+elastic.pred <-predict(elastic.mod, test)
+#confusion matrix
+c.matrixelastic <- confusionMatrix(data=elastic.pred, reference = test$Class)
+c.matrixelastic
+
+#ROC/AUC 
+pred.elastic <-predict(elastic.mod, test, probability = TRUE)
+pred.elastic <-as.ordered(pred.elastic)
+
+roc.elastic <-multiclass.roc(predictor = pred.elastic, response = test$Class, plot=TRUE)
+auc.elastic <-roc.elastic$auc
+
+#calculating values for CV table
+#optimal lambda
+tune.elastic <-elastic.mod$bestTune[1,2]
+#confusion matrix 
+tp.elastic <- (c.matrixelastic$table[1,1]) #true positive
+fp.elastic <-(sum(sum(c.matrixelastic$table[1,2:5]),(sum(c.matrixelastic$table[2,3:5])),sum(c.matrixelastic$table[3,4:5]),sum(c.matrixelastic$table[4,5]))) # false positive
+fn.elastic <- sum(sum(c.matrixelastic$table[2,1]),(sum(c.matrixelastic$table[3,1:2])),(sum(c.matrixelastic$table[4,1:3])),(sum(c.matrixelastic$table[5,1:4]))) #false negative
+tn.elastic <-sum(c.matrixelastic$table[2,2],c.matrixelastic$table[3,3], c.matrixelastic$table[4,4], c.matrixelastic$table[5,5]) # true negative
+cp.elastic<- tp.elastic + fn.elastic #condition positive 
+cn.elastic <- fp.elastic + tn.elastic #condition negative
+total.elastic <- tp.elastic+fp.elastic+fn.elastic+tn.elastic
+
+precision.elastic <- tp.elastic/(tp.elastic+fp.elastic)
+
+tpr.elastic <- tp.elastic/cp.elastic #true positive rate/sensitivity
+fpr.elastic <- fp.elastic/cn.elastic #false positive rate
+accuracy.elastic <- c.matrixelastic$overall["Accuracy"]
+```
+### Tuning Parameter $\lambda$
+The optimal lambda value chosen for our penalized logistic regression model is *0.0008751504*. This was value was chosen by first completing 10-fold cross validation on Ridge Regression, Lasso Regression, and ElasticNet regression. From the three, the model with the highest accuracy(ElasticNet) was chosen to predict on our test data. The ElasticNet model with a lambda value of *0.0008751504* has an accuracy of *0.8851647*.
+
+# Results (Cross-Validation)
+```{r echco=TRUE,warning=FALSE,cache=TRUE}
+
+cv_table <- data.frame(matrix(ncol = 7, nrow = 5))
+colnames(cv_table)<-c("Tuning", "AUROC", "Threshold", "Accuracy", "TPR", "FPR", "Precision")
+row.names(cv_table)<- c("Log Reg", "LDA", "QDA","KNN", "PLR")
+
+#adding in log reg values
+cv_table[1,1] <- "-"
+cv_table[1,2] <- auc.log
+cv_table[1,3] <- threshold.log
+cv_table[1,4] <- accuracy.log
+cv_table[1,5] <- tpr.log
+cv_table[1,6] <- fpr.log
+cv_table[1,7] <- precision.log
+
+#adding in lda values
+cv_table[2,1] <- "-"
+cv_table[2,2] <- auc.lda
+cv_table[2,3] <- "0.5"
+cv_table[2,4] <- accuracy.lda
+cv_table[2,5] <- tpr.lda
+cv_table[2,6] <- fpr.lda
+cv_table[2,7] <- precision.lda
+
+#adding in qda values
+cv_table[3,1] <- "-"
+cv_table[3,2] <- auc.qda
+cv_table[3,3] <- "0.5"
+cv_table[3,4] <- accuracy.qda
+cv_table[3,5] <- tpr.qda
+cv_table[3,6] <- fpr.qda
+cv_table[3,7] <- precision.qda
+
+#adding in KNN values
+cv_table[4,1] <- tune.knn
+cv_table[4,2] <- auc.knn
+cv_table[4,3] <- "-"
+cv_table[4,4] <- accuracy.knn
+cv_table[4,5] <- tpr.knn
+cv_table[4,6] <- fpr.knn
+cv_table[4,7] <- precision.knn
+
+#adding in ElasticNet values
+cv_table[5,1] <- tune.elastic
+cv_table[5,2] <- auc.elastic
+cv_table[5,3] <- "-"
+cv_table[5,4] <- accuracy.elastic
+cv_table[5,5] <- tpr.elastic
+cv_table[5,6] <- fpr.elastic
+cv_table[5,7] <- precision.elastic
+
+print.data.frame(cv_table)
+```
+# Conclusions
+
+### Conclusion \#1 
+After having run comparisons on all five models, it is my belief that the _K-Nearest_ _Neighbor_  _Model_(KNN) is the best choice for model at this point in time. Our KNN model has an accuracy of 0.9257209. The KNN model does not have the highest accuracy of all the models, but it is the second highest accuracy. The highest accuracy model,through our modeling, is our Logistic Regression model. I did not choose this model because unlike all the other models; I trained it on a strictly binary response data set. All "non-Blue Tarp" responses were grouped under one class and the other class contained all "Blue Tarp" responses. I was not consistent in following that same structure with the rest of my models.I did not feel comfortable in my ability to correctly implement multi-class logistic regression which is why I applied a binary reaponae format of the the original data set on the logistic regression model. I feel comfortable solely choosing a model on accuracy since in our scenario (disaster reflied) we want to be as accurate as possible since resources and time are restricted. It is worth noting that the AUC value obtained by KNN is the highest at 0.9511466, implying that KNN is the best (out of all the models) at classifying between classes. Lastly, in all other cross validation measures (as provided in the table above) exluding or Logistic Regression model, KNN out performs all the other models on TPR, FPR, and precision in addition to the previously stated accuracy and AUC values. This is desirable in a model as volunteers and aid workers aim to find affected people and provide them with assistance as quickly as possible.
+
+
+### Conclusion \#2
+In general, I believe that three of the models trained and tested on our data are well performing models. These models are Logistic Regression, KNN, and QDA. I believe that LDA and Penalized Logistic Regression can be removed from further consideration.The lowest accuracy model is Liner Discriminant Analysis (LDA) with an accuracy value of 0.8559755 the second lowest accuracy model is Penalized Logistic Regression(PLR)  with an accuracy value of 0.8833360. Linear Discriminant Analysis and Penalized Logistic Regression are the "worst" performing models but there are additional factors to consider. I believe that Penalized Logistic Regression is not appropriate for our specific data set. PLR is designed to penalize unnecessary predictors and in our data set there are no unnecessary predictors. Our data relies on RGB values to determine the color of a pixel and thus none can be removed or should be considered for removal/penalty. As for Linear Discriminant Analysis(LDA), our data, from EDA does not appear to have a perfectly linear relationship with the response. Scatterplots of each predictor against the response show a possible linear relationship, however, the values fan out which I believe is better modeled by Quadratic Linear Analysis (QDA) in order to avoid adding any unecessary bias to the model. The flexibility introduced through using a QDA model is better suited for our data which is not overly non-linear but not perfectly linear either. QDA should fit the data appropiately without compromising the model's bias/variance. This is shown through the accuracy difference between LDA and QDA where QDA performs better by ~0.05 in terms of accuracy. Lastly, when comparing LDA and QDA we must consider the size of our data set. Since we have over 60k observations and a small number of predictors, QDA is an appropiate choice since there are plenty of observations to train on and few predictors.
+
+### Conclusion \#3
+While I am a bit skeptical on the accuracy of the logistic regression model, I believe it could be very good in future model training. In the next part of this project I would spend more time either 
+1)performing a multi-class/multinomial regression on the data set 
+or 
+2) Performing regression on the other four models using a true binary response such as the one I used for the logistic regression. 
+
+As it stands the current logistic regression model on our data has a very high accuracy at 0.9944125. However, its AUC value is the second highest among all the models at 0.9308920. This is in contrast with  a very high True positive rate (TPR) of 0.9987476. The True positive rate is very high and differs significantly from all the other models which is concerning and more of a reason to further explore the logistic regression model. However, if future model training maintains the same general accuracy and predictive ability this model would be excellent and provide to be the most useful in our sceanario.
+
+### Conclusion \#4
+I believe that the use of this model and work, for disaster relief, would in fact save lives. I do not believe that it could function on its own as the only tool for relief efforts. This modeling would work best in conjunction with other tools that help model and predict the the best approachs on allocating resources and aid to displaced Haitians. The models presented above provide information as to what type of image is being shown but nothing else. This is not to discount the power of that knowledge as the provided information is very powerful. Ideally you want to combine this model with other models and tools that consider:
+| -  How far is a blue tarp from a(n) aid station(s)?
+| -  Is there a concentration of blue tarps in a certain radius and if so how many?
+| -  What type of navigable paths are there to the tarp location? i.e. land, water, etc
+| -  Are there signs that a blue tarp has someone residing under it or was it left behind/abandoned?
+
+The model created in this project would provide an important basis for more advanced tools that would increase the efficiency and efficacy of any aid being provided to displaced Haitians. Additionally, the implementation of more specified tools would inform aid organizations on how to properly allocate their resources as well as when and how to collaborate with other aid groups, if needed. Looking beyond the scope of this project, any future disasters with similar conditions would benefit greatly from the groundwork provided by the models used in Haiti. As the rate of disasters increase (whether from natural disasters/climate change) many developing countries will benefit from data science models that facilitate rescue and aid efforts.
+
+```{r echo=FALSE}
+knitr::knit_exit()    
+```
+
