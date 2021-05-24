@@ -1,0 +1,903 @@
+---
+title: "Disaster Relief Project Part II"
+author: "Chelsea Alvarado"
+date: "4/28/2021"
+output:
+  rmdformats::downcute:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    highlight: breezedark
+    df_print: default
+    lightbox: true
+  
+
+---
+
+```{r global_options, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=FALSE,    # collapse by default
+                      echo=TRUE,         # echo code by default
+                      comment = "#>",    # change comment character
+                      fig.width = 5.5,     # set figure width
+                      fig.align = "center",# set figure position
+                      out.width = "49%", # set width of displayed images
+                      warning=TRUE,      # show R warnings
+                      message=TRUE,
+                      cache=TRUE)      # show R messages
+```
+
+<!--- Change font sizes (or other css modifications) --->
+<style>
+h1.title {
+  font-size: 2.2em; /* Title font size */
+}
+h1 {
+  font-size: 2em;   /* Header 1 font size */
+}
+h2 {
+  font-size: 1.5em;
+}
+h3 { 
+  font-size: 1.2em;
+}
+pre {
+  font-size: 0.8em;  /* Code and R output font size */
+}
+</style>
+
+
+
+**SYS 6018 | Spring 2021 | University of Virginia **
+
+*******************************************
+# Introduction 
+
+This project is aimed at being able to identify the location of displaced Haitian's after the catastrophic 2010 earthquake using a characteristic blue tarp. The motivation behind this project is to be able to quickly identify locations so that rescue workers can provide needed assistance such as food and medicine.
+The data set being used consists of three predictor variables/features that represent RGB values and a response variable which is a Class representing what each observation represents based on the combination of RGB values. In its original form the data is multiclass.
+This project will train data on seven different models including Logistic Regression, Linear Discriminant Analysis, Quadratic Discriminant Analysis, K-Nearest Neighbors, Penalized Logistic Regression, Random Forest, and Support Vector Machines. The Penalized Logistic Regression Model will be chosen by comparing Ridge, Lasso, and Elastic Net Regression and picking the model with the best accuracy as the final penalized logistic regression model. The same approach will be used to identify the best SVM model by comparing the accuracy of a linear, radial and polynomial kernel. The training data will consist of the data file 'Haiti_Pixels.csv' and our test/hold_out data set will come from the provided zip file. The holdout data will be wrangled and put together to use for predictions. All of our values will be scaled to have a mean of zero and standard deviation of 1. The models will train on a training set while also using 10-fold Cross-Validation and then test on test data for accuracy and predictive ability. Due to the multiclass nature of the data, our response variable will be manipulated to be either "Blue Tarp" or " Not Tarp".". Tuning parameters(k, lambda, gamma, cost, etc) will be selected using cross validation. The results of each model will be presented at the end of the report in a table along with conclusions. This project relies heavily on the use of the caret library for finding the 'best' model for each different alogrithm. 
+
+
+```{r load-packages, include=FALSE}
+# Load Required Packages
+library(tidyverse)
+library(ISLR)
+library(caret)
+library(e1071)
+library(boot)
+library(pROC)
+library(MASS)
+library(class)
+library(purrr)
+library(dplyr)
+library(readr)
+```
+
+# Data Manipulation/Wrangling {.tabset .tabset-pills}
+## Hold Out Data 
+```{r echo = TRUE}
+#read in hold out data, define directory path
+directory <- "C:/Users/17039/Documents/MSDS/Spring 2021/SYS6018/Project" # where I want data to go
+
+filesin<-unzip(file.path(directory, "Hold+Out+Data.zip"), list=TRUE) #list out files in zip
+#unzip folder and put files in directory
+unzip(file.path(directory, "Hold+Out+Data.zip"), exdir = directory)
+
+```
+
+### Conversion of TXT Files into Dataframes
+```{r echo = FALSE, cache= TRUE}
+#create a list to hold all dfs
+df_list <-list()
+#1
+#look at data format
+read_lines(file.path(directory, "orthovnir057_ROI_NON_Blue_Tarps.txt"),
+n_max = 15)
+#removing empty columns and renaming RGB values
+ortho057_noblue <- read_table(file.path(directory, "orthovnir057_ROI_NON_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+#adding class label
+ortho057_noblue$Class <- "Non-blue Tarp"
+#removing unnecessary columns
+ortho057_noblue <-as.data.frame(ortho057_noblue[,-1:-7])
+
+#2
+#reading in next file to check format
+read_lines(file.path(directory, "orthovnir067_ROI_Blue_Tarps.txt"),
+n_max = 15)
+
+#removing empty columns and renaming RGB values
+ortho067_blue <- read_table(file.path(directory, "orthovnir067_ROI_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+
+
+#adding class label
+ortho067_blue$Class <- "Blue Tarp"
+#removing unnecessary columns
+ortho067_blue <-as.data.frame(ortho067_blue[,-1:-7])
+
+
+#3
+#reading in next file to check format
+ortho067_blue2 <- read.delim( "orthovnir067_ROI_Blue_Tarps_data.txt", header = TRUE, sep = "\t")%>%
+rename(Red=B1, Green=B2, Blue=B3)
+
+#adding class label
+ortho067_blue2$Class <- "Blue Tarp"
+
+#removing unnecessary columns
+ortho067_blue2 <-as.data.frame(ortho067_blue2[,-1])
+
+#4
+
+#reading in next file to check format
+read_lines(file.path(directory, "orthovnir067_ROI_NOT_Blue_Tarps.txt"),
+n_max = 15)
+
+#removing empty columns and renaming RGB values
+ortho067_noblue <- read_table(file.path(directory, "orthovnir067_ROI_NOT_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+
+#adding class label
+ortho067_noblue$Class <- "Non-blue Tarp"
+
+#removing unnecessary columns
+ortho067_noblue <-as.data.frame(ortho067_noblue[,-1:-7])
+
+#5
+
+#reading in next file to check format
+read_lines(file.path(directory, "orthovnir069_ROI_Blue_Tarps.txt"),
+n_max = 15)
+
+#removing empty columns and renaming RGB values
+ortho069_blue <- read_table(file.path(directory, "orthovnir069_ROI_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+
+#adding class label
+ortho069_blue$Class <- "Blue Tarp"
+
+#removing unnecessary columns
+ortho069_blue <-as.data.frame(ortho069_blue[,-1:-7])
+
+#6
+#reading in next file to check format
+read_lines(file.path(directory, "orthovnir069_ROI_NOT_Blue_Tarps.txt"),
+n_max = 15)
+
+#removing empty columns and renaming RGB values
+ortho069_noblue <- read_table(file.path(directory, "orthovnir069_ROI_NOT_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+
+#adding class label
+ortho069_noblue$Class <- "Non-blue Tarp"
+
+#removing unnecessary columns
+ortho069_noblue <-as.data.frame(ortho069_noblue[,-1:-7])
+
+#7
+#reading in next file to check format
+read_lines(file.path(directory, "orthovnir078_ROI_Blue_Tarps.txt"),
+n_max = 15)
+
+#removing empty columns and renaming RGB values
+ortho078_blue <- read_table(file.path(directory, "orthovnir078_ROI_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+
+#adding class label
+ortho078_blue$Class <- "Blue Tarp"
+
+#removing unnecessary columns
+ortho078_blue <-as.data.frame(ortho078_blue[,-1:-7])
+
+#8
+#reading in next file to check format
+read_lines(file.path(directory, "orthovnir078_ROI_NON_Blue_Tarps.txt"),
+n_max = 15)
+
+#removing empty columns and renaming RGB values
+ortho078_noblue <- read_table(file.path(directory, "orthovnir078_ROI_NON_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+
+#adding class label
+ortho078_noblue$Class <- "Non-blue Tarp"
+
+#removing unnecessary columns
+ortho078_noblue <-as.data.frame(ortho078_noblue[,-1:-7])
+```
+### Conversion into one single Dataframe for all 2 million+ observations
+
+```{r echo = TRUE, cache=TRUE}
+#create one central df
+hold_out <- data.frame()
+
+#merge first df into central df
+hold_out<-rbind(hold_out, ortho057_noblue)
+
+#repeat for remaining dfs
+hold_out<-rbind(hold_out, ortho067_blue)
+hold_out<-rbind(hold_out, ortho067_blue2)
+hold_out<-rbind(hold_out, ortho067_noblue)
+hold_out<-rbind(hold_out, ortho069_blue)
+hold_out<-rbind(hold_out, ortho069_noblue)
+hold_out<-rbind(hold_out, ortho078_blue)
+hold_out<-rbind(hold_out, ortho078_noblue)
+
+#change class labels
+hold_out$Class[hold_out$Class =="Non-blue Tarp"]<-"Not.Tarp"
+hold_out$Class[hold_out$Class =="Blue Tarp"]<-"Blue.Tarp"
+
+#make sure Class is a factor
+hold_out$Class <- as.factor(hold_out$Class)
+
+#change reference class
+hold_out$Class <-relevel(hold_out$Class, ref = "Not.Tarp")
+
+#scramble data 
+set.seed(4444)
+hold_out<-hold_out[sample(1:nrow(hold_out)),]
+
+#get rid of any missing values
+dim(hold_out)
+hold_out <- na.omit(hold_out)
+dim(hold_out) # no missing values
+```
+
+```{r echo=TRUE, cache=TRUE}
+#check number of obs for each class
+blue <- sum(hold_out$Class == 'Blue.Tarp')
+not <- sum(hold_out$Class == 'Not.Tarp')
+blue
+not
+
+```
+
+## Haiti Pixels Data
+
+### EDA/ Visualization
+```{r echo=TRUE, cache=TRUE}
+#load in Haiti Pixel Data
+setwd("~/MSDS/Spring 2021/SYS6018/Project")
+pix_data <- read.csv("HaitiPixels.csv")
+pix_data <- as.data.frame(pix_data)
+#attach(pix_data)
+
+#EDA
+#quantitative
+names(pix_data)
+head(pix_data)
+summary(pix_data)
+dim(pix_data)
+
+#check how many of each classification we have
+sum(pix_data$Class== "Vegetation")
+sum(pix_dataClass== "Blue Tarp")
+sum(pix_dataClass=="Rooftop")
+sum(pix_dataClass=="Soil")
+sum(pix_dataClass=="Various Non-Tarp")
+
+#graphical
+pairs(pix_data[,2:4], lower.panel = NULL)
+cor(pix_data[,2:4])
+plot(pix_data, col= c("red","green","blue"))
+```
+
+### Data preparation(training data)
+```{r echo = TRUE, cache=TRUE}
+
+#turn all class labels into binary choice
+pix_data$Class[pix_data$Class=="Blue Tarp"] <- "Blue.Tarp"
+pix_data$Class[pix_data$Class=="Various Non-Tarp"] <- "Not.Tarp"
+pix_data$Class[pix_data$Class=="Soil"] <- "Not.Tarp"
+pix_data$Class[pix_data$Class=="Vegetation"] <- "Not.Tarp"
+pix_data$Class[pix_data$Class=="Rooftop"] <- "Not.Tarp"
+
+#scramble data 
+set.seed(4444)
+pix_data<-pix_data[sample(1:nrow(pix_data)),]
+
+#factor class
+pix_data$Class <- as.factor(pix_data$Class)
+
+#class counts
+blue.p <- sum(pix_data$Class == "Blue.Tarp")
+not.p <- sum(pix_data$Class == "Not.Tarp")
+
+blue.p
+not.p
+
+#scale
+pix_datan <- preProcess(pix_data)
+pix_data <- predict(pix_datan, pix_data)
+hold_out<- predict(pix_datan, hold_out)
+```
+# Model Training {.tabset .tabset-pills}
+## Logistic Regression
+### Model Run
+```{r echo=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+#prep data for log reg
+log_df<-pix_data
+#check levels and relevel
+levels(log_df$Class)
+log_df$Class <-relevel(log_df$Class, ref = "Not.Tarp")
+
+#run log reg
+set.seed(4658)
+specs <- trainControl(method = "cv", number = 10, classProbs=TRUE)
+
+set.seed(356)
+
+#model
+log.mod <- train(log_df[,2:4],log_df[,1], method = "glm", family = "binomial", trControl = specs)
+
+#model summary
+log.mod
+summary(log.mod)
+```
+
+### Prediction,Confusion Matrix, and ROC/AUC Curve
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+#predicting against test data
+pred<-predict(log.mod,hold_out)
+
+#confusion matrix
+c.matrix <- confusionMatrix(data=pred, hold_out$Class)
+c.matrix
+
+#ROC/AUC
+library(pROC)
+library(randomForest)
+
+log.pred <- predict(log.mod, newdata=hold_out, probability = TRUE)
+log.pred <- as.ordered(log.pred)
+
+log.roc <- roc(hold_out$Class, log.pred)
+plot(log.roc,ylim=c(0,1))
+
+auc.log <-log.roc$auc
+```
+
+### Manual Threshold testing
+```{r echo=TRUE, warning=FALSE,cache=TRUE}
+#code I ran to test thresholds
+#regression
+pix_log<-glm(Class~Red+Green+Blue,data=log_df, family=binomial)
+summary(pix_log)
+
+#preparing data for confusion matrix
+pix_log_prob<- predict(pix_log, hold_out, type="response")
+pix_log_pred<-rep("Non.Tarp",length(pix_log_prob))  #non tarp classes lumped together all non blue tarp values under the label "Non.Tarp" 
+pix_log_pred[pix_log_prob>.5]="Blue.Tarp"
+
+#confusion matrix
+table(pix_log_pred,hold_out$Class)
+
+#correct predictions
+correct.log <- mean(pix_log_pred==hold_out$Class)
+correct.log
+#test error rate
+error_log_5<- mean(pix_log_pred!=hold_out$Class)
+error_log_5
+
+##using a higher threshold value 
+#preparing data for confusion matrix
+pix_log_prob<- predict(pix_log, hold_out, type="response")
+pix_log_pred<-rep("Non.Tarp",length(pix_log_prob)) #since log reg produces binary response values I lumped together all non blue tarp values under the label "Not Tarp"
+pix_log_pred[pix_log_prob>.75]="Blue.Tarp"
+
+#confusion matrix
+table(pix_log_pred,hold_out$Class)
+
+#correct predictions
+mean(pix_log_pred==hold_out$Class)
+#test error rate
+error_log_7<- mean(pix_log_pred!=hold_out$Class)
+error_log_7
+
+threshold.log <- 0.7
+
+```
+
+### CV Table Calculations
+```{r echo=TRUE, cache=TRUE}
+#calculating values for CV table
+tp.log <- c.matrix$table[1,1] #true positive
+fp.log <-c.matrix$table[1,2]# false positive
+fn.log <- c.matrix$table[2,1] #false negative
+tn.log <-c.matrix$table[2,2] # true negative
+cp.log<- tp.log + fn.log #condition positive (true positive + false negative)
+cn.log <- fp.log + tn.log #condition negative (false positive + true negative)
+total.log <- tp.log+fp.log+fn.log+tn.log
+
+precision.log <- tp.log/(tp.log+fp.log)
+
+tpr.log <- c.matrix$byClass['Sensitivity'] #true positive rate/sensitivity
+fpr.log <- fp.log/cn.log #false positive rate
+accuracy.log <- (tp.log+tn.log)/total.log 
+```
+
+
+### Threshold Justification
+Logistic regression is better suited for binary responses but our data is multi-class. Since we wanted to use logistic regression we were able to combine all the non-tarp classes under a single class of "Non.Tarp" and run the logistic model under that assumption. As for our tuning parameter, one is inclined to choose a higher value since in the situation we are handling sending out help to those who need it most requires resources and you don't want to waste time or money. After comparing a threshold of 0.5 and 0.75, just by test error, our model performs better at a threshold level of 0.75 but the difference is very small(in the thousandts of a decimal) between the two thresholds. The selected threshold value was chosen for ease of implementation, as well as, restraints on threshold abilities using the train() function. I have chosen to use a threshold of 0.5. This is the assumed threshold value for all of our remaining models to remain as consistent as possible.
+
+
+## Linear Discriminant Analysis (LDA)
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+library(MASS)
+#train model
+lda.spec <- trainControl(method="cv", number = 10, savePredictions = TRUE)
+
+lda.mod <- train(Class~., data = pix_data, method = "lda", trControl = lda.spec)
+lda.mod
+#preparing data for confusion matrix
+lda.pred<-predict(lda.mod, newdata=hold_out)
+```
+
+### Prediction,Confusion Matrix, and ROC/AUC Curve
+```{r echo=TRUE, cache=TRUE}
+#confusion matrix
+c.matrixlda<- confusionMatrix(data=lda.pred, reference=hold_out$Class)
+c.matrixlda
+
+#ROC/AUC
+pred.lda <-predict(lda.mod, hold_out, probability = TRUE)
+pred.lda<- as.ordered(pred.lda)
+
+roc.lda <-multiclass.roc(predictor = pred.lda, response = hold_out$Class, plot=TRUE)
+
+auc.lda <- roc.lda$auc
+
+#calculating values for CV table
+tp.lda <- c.matrix$table[1,1]  #true positive
+fp.lda <- c.matrix$table[1,2] # false positive
+fn.lda <- c.matrix$table[2,1]  #false negative
+tn.lda <- c.matrix$table[2,2]  # true negative
+cp.lda<- tp.lda + fn.lda #condition positive (true positive + false negative)
+cn.lda <- fp.lda + tn.lda #condition negative (false positive + true negative)
+total.lda <- tp.lda+fp.lda+fn.lda+tn.lda
+
+precision.lda <- tp.lda/(tp.lda+fp.lda)
+
+tpr.lda <- (tp.lda/cp.lda) #true positive rate/sensitivity
+fpr.lda <- (fp.lda/cn.lda) #false positive rate
+accuracy.lda <- c.matrixlda$overall["Accuracy"]  
+```
+
+## Quadratic Discriminant Analysis (QDA)
+```{r echo = TRUE,warning=FALSE,cache=TRUE}
+qda.spec <- trainControl(method="cv", number = 10)
+
+qda.mod <- train(Class~., data = pix_data, method = "qda", trControl = lda.spec)
+
+qda.mod
+```
+
+### Prediction,Confusion Matrix, and ROC/AUC Curve
+```{r echo=TRUE, cache=TRUE}
+#predict on model
+qda.pred<-predict(qda.mod, newdata=hold_out)
+
+#confusion matrix
+c.matrixqda<- confusionMatrix(data=qda.pred, reference=hold_out$Class)
+c.matrixqda
+
+#ROC/AUC
+pred.qda <-predict(qda.mod, hold_out, probability = TRUE)
+pred.qda <- as.ordered(pred.qda)
+
+roc.qda <-multiclass.roc(predictor = pred.qda, response = hold_out$Class, plot=TRUE)
+
+auc.qda <- roc.qda$auc
+
+#calculating values for CV table
+#confusion matrix 
+tp.qda <- (c.matrixqda$table[1,1]) #true positive
+fp.qda <-(c.matrixqda$table[1,2]) # false positive
+fn.qda <- (c.matrixqda$table[2,1]) #false negative
+tn.qda <-(c.matrixqda$table[2,2]) # true negative
+cp.qda<- tp.qda + fn.qda #condition positive 
+cn.qda <- fp.qda + tn.qda #condition negative 
+total.qda <- tp.qda+fp.qda+fn.qda+tn.qda
+
+precision.qda <- tp.qda/(tp.qda+fp.qda)
+
+tpr.qda <- tp.qda/cp.qda #true positive rate/sensitivity
+fpr.qda <- fp.qda/cn.qda #false positive rate
+accuracy.qda <- c.matrixqda$overall["Accuracy"] 
+```
+
+## K-Nearest Neighbors (KNN)
+```{r echo=TRUE, warning=FALSE,cache=TRUE}
+library(class)
+set.seed(145)
+specs <- trainControl(method = "cv", number = 10)
+
+#model
+knn.mod <- train(pix_data[,2:4], pix_data[,1],method="knn", trControl=specs, metric = "Accuracy")
+knn.mod
+
+#prediction
+knn.pred<-predict(knn.mod, hold_out)
+#confusion matrix
+c.matrixknn <- confusionMatrix(data=knn.pred, reference = hold_out$Class)
+c.matrixknn
+
+#ROC/AUC 
+pred.knn <-predict(knn.mod, hold_out, probability = TRUE)
+pred.knn <-as.ordered(pred.knn)
+
+roc.knn <-multiclass.roc(predictor = pred.knn, response = hold_out$Class, plot=TRUE)
+
+auc.knn <-roc.knn$auc
+
+#calculating values for CV table
+#optimal k
+tune.knn <-knn.mod$bestTune[,1]
+#confusion matrix 
+tp.knn <- (c.matrixknn$table[1,1]) #true positive
+fp.knn <- (c.matrixknn$table[1,2]) # false positive
+fn.knn <- (c.matrixknn$table[2,1]) #false negative
+tn.knn <- (c.matrixknn$table[2,2]) # true negative
+cp.knn<- tp.knn + fn.knn #condition positive 
+cn.knn <- fp.knn + tn.knn #condition negative
+total.knn <- tp.knn+fp.knn+fn.knn+tn.knn
+
+precision.knn <- tp.knn/(tp.knn+fp.knn)
+
+tpr.knn <- tp.knn/cp.knn #true positive rate/sensitivity
+fpr.knn <- fp.knn/cn.knn #false positive rate
+accuracy.knn <- c.matrixknn$overall["Accuracy"] 
+```
+
+### Tuning Parameter $k$
+The optimal K for our KNN model was selected by first running 10-fold Cross-Validation on our training data. Once the cross-validation was complete, the optimal k chosen for our model was based on the accuracy metric. In the case of our KNN model a value of `r tune.knn` produced the highest accuracy of `r accuracy.knn`.
+
+## Penalized Logistic Regression (ElasticNet)
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+#deciding which penalized log reg model to use
+library(glmnet)
+#prep
+x.mat <- model.matrix(Class~., data= pix_data)
+y <- pix_data$Class
+#lambda grid
+grid=10^seq(10,-2,length=100)
+
+plr.spec <- trainControl(method = "cv", number = 10)
+
+set.seed(16454)
+
+#ridge regression
+ridge<- train(Class~., data=pix_data, method ="glmnet", tuneGrid = expand.grid(alpha=0, lambda=grid), metric = "Accuracy")
+ridge.lam <- ridge$bestTune['lambda']
+ridge.acc <- ridge$results[6,3]
+
+lasso <- train(Class~., data=pix_data, method ="glmnet", tuneGrid = expand.grid(alpha=1, lambda=grid), metric = "Accuracy")
+lasso.lam <- lasso$bestTune['lambda']
+lasso.acc <- lasso$results[1,3]
+
+#elasticnet(final model)
+elastic.spec <-trainControl(method = "cv", number = 10, classProbs = TRUE)
+set.seed(94)
+elastic.mod <- train(Class~., data=pix_data, method = "glmnet", trControl = elastic.spec,  metric = "Accuracy")
+
+elastic.lam <- elastic.mod$bestTune[,2]
+elastic.acc <- elastic.mod$results[7,3]
+
+#comparing accuracy across all three
+acc.table <- data.frame(matrix(ncol = 3, nrow = 1))
+colnames(acc.table) <- c("Ridge", "Lasso", "ElasticNet")
+row.names(acc.table) <- ("Accuracy")
+acc.table[1,1] <- ridge.acc
+acc.table[1,2] <- lasso.acc
+acc.table[1,3] <- elastic.acc
+
+#show final table
+print(acc.table)
+```
+
+### Modeling best fit for Penalized Regression (ElasticNet)
+```{r echo=TRUE,warning=FALSE,cache=TRUE}
+#predict on test data
+elastic.pred <-predict(elastic.mod, hold_out)
+#confusion matrix
+c.matrixelastic <- confusionMatrix(data=elastic.pred, reference = hold_out$Class)
+c.matrixelastic
+
+#ROC/AUC 
+pred.elastic <-predict(elastic.mod, hold_out, probability = TRUE)
+pred.elastic <-as.ordered(pred.elastic)
+
+roc.elastic <-multiclass.roc(predictor = pred.elastic, response = hold_out$Class, plot=TRUE)
+auc.elastic <-roc.elastic$auc
+
+#calculating values for CV table
+#optimal lambda
+tune.elastic <-elastic.mod$bestTune[1,2]
+#confusion matrix 
+tp.elastic <- (c.matrixelastic$table[1,1]) #true positive
+fp.elastic <- (c.matrixelastic$table[1,2]) # false positive
+fn.elastic <- (c.matrixelastic$table[2,1]) #false negative
+tn.elastic <- (c.matrixelastic$table[2,2]) # true negative
+cp.elastic<- tp.elastic + fn.elastic #condition positive 
+cn.elastic <- fp.elastic + tn.elastic #condition negative
+total.elastic <- tp.elastic+fp.elastic+fn.elastic+tn.elastic
+
+precision.elastic <- tp.elastic/(tp.elastic+fp.elastic)
+
+tpr.elastic <- tp.elastic/cp.elastic #true positive rate/sensitivity
+fpr.elastic <- fp.elastic/cn.elastic #false positive rate
+accuracy.elastic <- c.matrixelastic$overall["Accuracy"]
+```
+
+## Tuning Parameter $\lambda$
+The optimal lambda value chosen for our penalized logistic regression model is `r elastic.lam`. This was value was chosen by completing 10-fold cross validation on Ridge Regression, Lasso Regression, and ElasticNet regression.The model with the highest accuracy(ElasticNet) was chosen to predict on our test data. The ElasticNet model has a lambda value of `r elastic.lam`  which results in an accuracy value of `r elastic.acc`.
+
+## Random Forest (RF)
+```{r echo=FALSE, cache=TRUE}
+library(randomForest)
+set.seed(456)
+
+rf.spec <- trainControl(method="cv", number = 10, savePredictions = TRUE, returnResamp='all')
+
+rf.mod <- train(Class~., data = pix_data, method = 'rf', importance = TRUE, tuneGrid = data.frame(mtry=2), trControl = rf.spec)
+rf.mod
+
+#variable importance and associated plot
+importance(rf.mod)
+varImpPlot(rf.mod, main = "Variable Importance Plot")
+
+#predict on holdout
+pred.rf <-predict(rf.mod, hold_out, probability = TRUE)
+pred.rf <-as.ordered(pred.rf)
+
+#save final model
+rf.mod <- rf.mod$finalModel
+
+#ROC/AUC
+roc.rf <-multiclass.roc(predictor = pred.rf, response = hold_out$Class, plot=TRUE)
+auc.rf <-roc.rf$auc
+
+#confusion matrix 
+c.matrixrf <- confusionMatrix(data=pred.rf, reference = hold_out$Class)
+c.matrixrf
+
+#calculating values for CV table
+
+tp.rf <- (c.matrixrf$table[1,1]) #true positive
+fp.rf <- (c.matrixrf$table[1,2]) # false positive
+fn.rf <- (c.matrixrf$table[2,1]) #false negative
+tn.rf <- (c.matrixrf$table[2,2]) # true negative
+cp.rf<- tp.rf + fn.rf #condition positive 
+cn.rf <- fp.rf + tn.rf #condition negative
+total.rf <- tp.rf+fp.rf+fn.rf+tn.rf
+
+precision.rf <- tp.rf/(tp.rf+fp.rf)
+
+tpr.rf <- tp.rf/cp.rf #true positive rate/sensitivity
+fpr.rf <- fp.rf/cn.rf #false positive rate
+accuracy.rf <- c.matrixrf$overall["Accuracy"]
+
+```
+
+
+
+## Support Vector Machines (SVM)
+### Determining Which SVM method
+```{r echo=TRUE, cache=TRUE}
+library(kernlab)
+svm.spec <- trainControl(method="cv", number = 10, savePredictions = TRUE)
+
+#linear
+svm.mod.lin <- train(Class~., data = pix_data, method = "svmLinear", trControl = svm.spec)
+svm.mod.lin
+
+# best parameters
+lin.best <- svm.mod.lin$bestTune
+lin.cost <- svm.mod.lin$bestTune[1,1]
+
+# final linear model
+#svm.mod.linf <- svm(Class~., data=pix_data, kernel="linear", cost=lin.cost, scale = FALSE)
+
+
+#radial
+svm.mod.rad <- train(Class~., data = pix_data, method = "svmRadial", trControl = svm.spec)
+svm.mod.rad
+
+# best parameters
+rad.best <- svm.mod.rad$bestTune
+rad.gam <- svm.mod.rad$bestTune[1,1]
+rad.cost <-svm.mod.rad$bestTune[1,2]
+
+#final radial mod
+svm.mod.radf <- svm(Class~., data=pix_data, kernel="radial",  gamma=rad.gam, cost=rad.cost, scale = FALSE)
+
+
+svm_table <- data.frame(matrix(ncol = 3, nrow = 1))
+colnames(svm_table)<-c("Linear", "Radial", "Poly")
+row.names(svm_table)<- c("Accuracy")
+
+svm_table[1,1] <- 0.9949874 # linear accuracy
+svm_table[1,2] <- 0.9970272 # radial accuracy
+```
+
+
+``` {r echo= TRUE, cache=TRUE}
+#poly
+library(e1071)
+
+#need to split training set into a much smaller chunk in order to train in a timely manner
+#set up split
+set.seed(55)
+sample <- createDataPartition(pix_data$Class, p=0.4, list = FALSE)
+svmpoly <- pix_data[sample,]
+
+#tuning parameters on 40% of training data
+tune.out2=tune(svm, Class~., data=svmpoly, kernel="poly", ranges=list(cost=c(0.1,1,10,100),gamma=c(0.5,1,2,3,4.5)))
+summary(tune.out2)
+
+#best parameters
+tune.out2$best.parameters
+
+poly.gam <- tune.out2$best.parameters[1,2]
+poly.cost <- tune.out2$best.parameters[1,1]
+
+acc.poly <- 1 - tune.out2$best.performance
+
+#final model with best parameters
+#svm.mod.pol <- svm(Class~., data=pix_data, kernel="poly",  gamma=poly.gam, cost=poly.cost, scale = FALSE)
+#svm.mod.pol
+
+svm_table[1,3] <- acc.poly
+
+#table comparing accuracy across SVM kernels
+svm_table
+```
+
+### Prediction,Confusion Matrix, and ROC/AUC Curve
+```{r echo = TRUE, cache=TRUE}
+#predict
+svm.pred <- predict(svm.mod.rad, hold_out)
+#confusion matrix
+c.matrixsvm <- confusionMatrix(data=svm.pred, reference = hold_out$Class)
+c.matrixsvm
+
+#ROC/AUC 
+pred.svm <-predict(svm.mod.rad, hold_out, probability = TRUE)
+pred.svm <-as.ordered(pred.svm)
+
+roc.svm <-multiclass.roc(predictor = pred.svm, response = hold_out$Class, plot=TRUE)
+auc.svm <-roc.svm$auc
+
+#calculating values for CV table
+#optimal  values
+rad.gam <- svm.mod.rad$bestTune[1,1]
+rad.cost <-svm.mod.rad$bestTune[1,2]
+#confusion matrix 
+tp.svm <- (c.matrixsvm$table[1,1]) #true positive
+fp.svm <- (c.matrixsvm$table[1,2]) # false positive
+fn.svm <- (c.matrixsvm$table[2,1]) #false negative
+tn.svm <- (c.matrixsvm$table[2,2]) # true negative
+cp.svm<- tp.svm + fn.svm #condition positive 
+cn.svm <- fp.svm + tn.svm #condition negative
+total.svm <- tp.svm+fp.svm+fn.svm+tn.svm
+
+precision.svm <- tp.svm/(tp.svm+fp.svm)
+
+tpr.svm <- tp.svm/cp.svm #true positive rate/sensitivity
+fpr.svm <- fp.svm/cn.svm #false positive rate
+accuracy.svm <- c.matrixsvm$overall["Accuracy"]
+
+```
+
+# Results (Cross-Validation)
+```{r echco=TRUE,warning=FALSE,cache=TRUE, layout="l-body-outset"}
+
+cv_table <- data.frame(matrix(ncol = 7, nrow = 7))
+colnames(cv_table)<-c("Tuning", "AUROC", "Threshold", "Accuracy", "TPR", "FPR", "Precision")
+row.names(cv_table)<- c("Log Reg", "LDA", "QDA","KNN", "PLR", "RF", "SVM")
+
+#adding in log reg values
+cv_table[1,1] <- "-"
+cv_table[1,2] <- auc.log
+cv_table[1,3] <- threshold.log
+cv_table[1,4] <- accuracy.log
+cv_table[1,5] <- tpr.log
+cv_table[1,6] <- fpr.log
+cv_table[1,7] <- precision.log
+
+#adding in lda values
+cv_table[2,1] <- "-"
+cv_table[2,2] <- auc.lda
+cv_table[2,3] <- "0.5"
+cv_table[2,4] <- accuracy.lda
+cv_table[2,5] <- tpr.lda
+cv_table[2,6] <- fpr.lda
+cv_table[2,7] <- precision.lda
+
+#adding in qda values
+cv_table[3,1] <- "-"
+cv_table[3,2] <- auc.qda
+cv_table[3,3] <- "0.5"
+cv_table[3,4] <- accuracy.qda
+cv_table[3,5] <- tpr.qda
+cv_table[3,6] <- fpr.qda
+cv_table[3,7] <- precision.qda
+
+#adding in KNN values
+cv_table[4,1] <- tune.knn
+cv_table[4,2] <- auc.knn
+cv_table[4,3] <- "-"
+cv_table[4,4] <- accuracy.knn
+cv_table[4,5] <- tpr.knn
+cv_table[4,6] <- fpr.knn
+cv_table[4,7] <- precision.knn
+
+#adding in ElasticNet values
+cv_table[5,1] <- tune.elastic
+cv_table[5,2] <- auc.elastic
+cv_table[5,3] <- "-"
+cv_table[5,4] <- accuracy.elastic
+cv_table[5,5] <- tpr.elastic
+cv_table[5,6] <- fpr.elastic
+cv_table[5,7] <- precision.elastic
+
+#adding in Random Forest values
+cv_table[6,1] <- "2"
+cv_table[6,2] <- auc.rf
+cv_table[6,3] <- "-"
+cv_table[6,4] <- accuracy.rf
+cv_table[6,5] <- tpr.rf
+cv_table[6,6] <- fpr.rf
+cv_table[6,7] <- precision.rf
+
+#adding in SVM values
+cv_table[7,1] <- rad.gam
+cv_table[7,2] <- auc.svm
+cv_table[7,3] <- "-"
+cv_table[7,4] <- accuracy.svm
+cv_table[7,5] <- tpr.svm
+cv_table[7,6] <- fpr.svm
+cv_table[7,7] <- precision.svm
+
+library(kableExtra)
+kbl(cv_table) 
+```
+
+# Conclusions
+
+### Conclusion \#1 
+**A discussion of the best performing algorithm(s) in the cross-validation and hold-out data.**
+After having run comparisons on all seven models, I believe the best performing algorithm/model is Penalized Logistic Regression. More specifically, the final model used ElasticNet PLR which was chosen based off of its accuracy in comparison to Lasso and Ridge Regression models. In order to come to this conclusion I primarily looked at two metrics across all the models, the accuracy and AUROC values. PLR has both the highest **accuracy** at **`r accuracy.elastic`** and the highest **AUROC** value of **`r auc.elastic`**. I also considered the False Positive Rate which has a value of **`r fpr.elastic`**. The FPR is not the lowest of all the models but it is the second lowest valuewhich indicates that it is correctly classifying. In the first portion of this project, I had selected KNN as the best model, at the time, based off of the AUROC value since I had not been consistent with how my data was partitioned and scaled across all models. This time around everything as held consistent across all models. Previously, PLR was the second worst performing model out of the original five. Initially, I theorized that PLR would not be a good option because it would not make sense to penalize any single predictor since RGB values work together to produce a single color. Considering the results from training our models this time around, PLR does make sense as a top performing algorithm. In our model we are interested in identifying **blue tarp** so the most influential predictor would be the B/Blue predictor since it's absence or low concentration would indicate a "Not Tarp" and conversely it presence in high concentrations would indicate a blue tarp. However, in general the majority of the models performed well on the hold out data.
+
+### Conclusion \#2
+**A discussion or analysis justifying why your findings above are compatible or reconcilable.**
+In contrasting the models previously trained in part 1 with the the models trained this time around I believe that the results are compatible. This second time around there are a few factors that influenced the changes in model performance. Firstly, the amount of data available to train on increased since our original Haiti Pixels data set could now be used for training. The addition of the hold out data set also allowed the models to predict on over 2 million observations in contrast to the roughly 19 thousand observations in part 1. Another factor that changed was that this time around I used the same binary class data set of Blue Tarp vs Not Blue Tarp across all models and not just for logistic regression. In the same vein, previously I scaled the data solely for use in KNN and it was scaled such that there was information leakage. This time around, the training data was first scaled and the resulting mean and standard deviation were used to scale the hold out data set. All of these changes added up resulted in markedly improved accuracy across all of the trained models. One item to take note of, and will be discussed further in later conclusions, is the very unbalanced distribution between classes. This unbalance has a major effect on models such as Support Vector Machines which has the lowest **AUC** of **`r auc.svm`** and the highest  **FPR** of **`r fpr.svm`** despite having an accuracy of **`r accuracy.svm`** which is comparable to the other top performing models.
+
+
+### Conclusion \#3
+**A recommendation and rationale regarding which algorithm to use for detection of blue tarps**
+Based off of our dataset, I believe that there are a couple of options for which algorithm to use and which one is best depends on the goals of the person/group using the model. The best options for this specific data set are either PLR or Logistic Regression. If the entity using the data and models is interested in dispersing aid in a fast and efficient manner then the best option would be Logistic Regression since it has the lowest False Positive Rate. In later conclusions there is discussion on what types of data Logistic Regression performs best on which should be considered when selecting this model. If you are in a time crunch with limited resources youwwant to be as confident as possible in where you're dispersing your limited resources. However, if an entity has plenty of resources and doesn't mind taking risks on identifying displaced persons then PLR is a good option since it has the highest accuracy of all the models but its FPR is slightly higher(thousandths of a decimal) than Logistic Regression. 
+
+### Conclusion \#4
+**A discussion of the relevance of the metrics calculated in the tables to this application context**
+The objective of this project is to identify a model that best performs so that displaced Haitian's can be provided assistance and resources post-earthquake. So the utmost importance is making sure that help is being provided in a timely  and efficient manner. Therefore the metrics we are most concerned with are Accuracy, False Positive Rate, and AUROC (listed in no particular order). The AUCROC and FPR values account for how well a model classifys/misclassifys the data. Ideally, you want a model wuith a high AUCROC value and a low FPR value since you want to be accurate and misclassify as little as possible especially in our scenario involving human lives. Accuracy is also important but it should not be the sole metric used to determine the final/best model but rather a guiding point while considering other relavent metrics, esepcially when handling an unbalanced data set. Other metrics that are not as relevant for making decisions on models in our case are the True Positive Rate and Precision. The TPR is very similar to the accuracy metric in terms of value so it does not provide any _new_ useful information that was not already available. Lastly, precision is not very helpful in our case since all the models have precision values that are similar and very high. Other metrics involved in our CV Table include tuning paramters and threshold values which have been previosuly discussed in earlier parts of this report.
+
+
+### Conclusion \#5
+**Unbalanced Data**
+The data set we are handling consists of pixels used to identify blue tarps in Haiti. This means that when using images taken that the majority of pixels will not be part of a blue tarp simply due to the nature of the imaeges. Similaraly, if you were to take a picture of one side of the earth there will usually be many more ocean pixels than land pixels. This means that our data will always be unbalanced in this context. To try and balance the data would have too mean there are many more blue tarps which would then in som ways reduce the urgency for models to locate them. Regardless, the fact that are data is so unbalanced in both the training and test sets, has implications on model training and subsequent metrics. The unbalanced data's influence is evident in our SVM model which has a high accuracy but a low AUCROC value. Literature (https://storm.cis.fordham.edu/~gweiss/papers/icdata-2019-imbalanced.pdf) indicates that SVM handles unbalanced data poorley. The same literature indicates that Logistic Regression does not handle unbalanced data well, however, our metrics for Logistic Regression and PLR contradicts the literature. There are no obvious contradictions that I can note that would indicate that their perfomance is incorrect.
+There are a few ways that unbalanced data can be corrected such as resampling data, obtaining more data, and using cross validation. In our case we already implemented cross-validation but one could attempt to use different seeds and different fold sizes. The use of resampling or obtaining more data is not particularly useful in our case. Unless observations came from an area with a high density of refugees, its unlikely that the data would balance and even then our model would not be very useful for the intended purpose of finding displaced refugees. Understanding the nature of our data allows us to appropiately pick models.
+
+### Conclusion \#6
+**Random Forest and Support Vector Machines**
+The second part of the project introduced the use of both Random Forest and Support Vector Machines to train on and model our data. These two models are very effective as demonstrated in class exercises often out performing other models( LDA, QDA, Logistic Reg, etc). Going into this second part of the project I had an expectation that these two models would be the top performers. The paper we read in class attemptig to find the 'best' model indicated that both these models would be a great fit to use, however, this was not the case. The Random Forest performed decently with an accuracy of **`r accuracy.rf`** but its **AUCROC** value of **`r auc.rf`** and **FPR** value of **`r fpr.rf`** were indicative of increased misclassification in comparison to the original five models from part 1. Out of all seven models Random Forest would be what I would classify as the 3rd "worst' model. One of the characteristics of RF is the number of features considered at each split(mtry). Since our data only has three features there was not much room to try out various mtry values. Using the suggested $\sqrt p$, we have to round up to 2 as our mtry value, additionally using mtry = 1 or mtry = 3 would equate to not using RF so that limits our optino to just 2. I believe that the small number of features prevented Random Forest from performing to its maximum potential and that is why it is not very useful for our specific data set. 
+The SVM model as previously discussed in conclulsion #5, is not an appropiate model for the nature of our data which limited its performance on our data set. Regardless, there a few paramters that had to be tuned and considered. Primarily it was necessary to narrow down the SVM by its kernel. In order to select a kernel the accuracy of all three kernel types(linear, radial, and polynomial) were compared following the same approach that was used in Penalized Logistic Regression.In general, tuning and training an SVM model with a polynomial kernel is very time intensive and particularly on such a large data set. As a result this required me to train on 40% of the training set and then use the resulting best paramters to train the final model. In order to assure that I was getting the best parameters I tuned on multiple percentages(0.1, 0.15, 0.25, 0.35, 0.4) of the data until the best parameters no longer changed and remained stable. Ultimately the highest accuracy kernal was radial with an accuracy of **0.9970272**. The corresponding best parameters are **gamma = 8.418865** and **cost = `r rad.cost`**. Due to the previosuly mentioned unbalanced data the accuracy on each kernel type could be off but in general all three kernel types had an aprroximately accuracy of 0.99. Unfortunately despite big hopes for SVM this was not its  time to shine.
