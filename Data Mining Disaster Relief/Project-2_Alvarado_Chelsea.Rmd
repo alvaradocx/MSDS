@@ -79,7 +79,7 @@ library(readr)
 ## Hold Out Data 
 ```{r echo = TRUE}
 #read in hold out data, define directory path
-directory <- "C:/Users/17039/Documents/MSDS/Spring 2021/SYS6018/Project" # where I want data to go
+directory <- "~/MSDS/Spring 2021/SYS6018/Project" # where I want data to go
 
 filesin<-unzip(file.path(directory, "Hold+Out+Data.zip"), list=TRUE) #list out files in zip
 #unzip folder and put files in directory
@@ -97,7 +97,7 @@ read_lines(file.path(directory, "orthovnir057_ROI_NON_Blue_Tarps.txt"),
 n_max = 15)
 #removing empty columns and renaming RGB values
 ortho057_noblue <- read_table(file.path(directory, "orthovnir057_ROI_NON_Blue_Tarps.txt"),
-skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+skip=7, col_types = cols(`;`="-", ID = "c"))%>%
 rename(Red=B1, Green=B2, Blue=B3)
 #adding class label
 ortho057_noblue$Class <- "Non-blue Tarp"
@@ -280,10 +280,10 @@ dim(pix_data)
 
 #check how many of each classification we have
 sum(pix_data$Class== "Vegetation")
-sum(pix_dataClass== "Blue Tarp")
-sum(pix_dataClass=="Rooftop")
-sum(pix_dataClass=="Soil")
-sum(pix_dataClass=="Various Non-Tarp")
+sum(pix_data$Class== "Blue Tarp")
+sum(pix_data$Class=="Rooftop")
+sum(pix_data$Class=="Soil")
+sum(pix_data$Class=="Various Non-Tarp")
 
 #graphical
 pairs(pix_data[,2:4], lower.panel = NULL)
@@ -646,21 +646,23 @@ The optimal lambda value chosen for our penalized logistic regression model is `
 library(randomForest)
 set.seed(456)
 
-rf.spec <- trainControl(method="cv", number = 10, savePredictions = TRUE, returnResamp='all')
+rf.model <- randomForest(Class~., data = pix_data, mtry=2, importance = TRUE)
 
-rf.mod <- train(Class~., data = pix_data, method = 'rf', importance = TRUE, tuneGrid = data.frame(mtry=2), trControl = rf.spec)
-rf.mod
+#rf.spec <- trainControl(method="cv", number = 10, savePredictions = TRUE, returnResamp='all')
+
+#rf.mod <- train(Class~., data = pix_data, method = 'rf', importance = TRUE, tuneGrid = data.frame(mtry=2), #trControl = rf.spec)
+#rf.mod
 
 #variable importance and associated plot
-importance(rf.mod)
+importance(rf.model)
 varImpPlot(rf.mod, main = "Variable Importance Plot")
 
 #predict on holdout
-pred.rf <-predict(rf.mod, hold_out, probability = TRUE)
+pred.rf <-predict(rf.model, hold_out, probability = TRUE)
 pred.rf <-as.ordered(pred.rf)
 
 #save final model
-rf.mod <- rf.mod$finalModel
+#rf.mod <- rf.mod$finalModel
 
 #ROC/AUC
 roc.rf <-multiclass.roc(predictor = pred.rf, response = hold_out$Class, plot=TRUE)
